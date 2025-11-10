@@ -1,107 +1,118 @@
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 
-local BoothSniper = {}
-
--- Real-time item price database
-BoothSniper.ItemPrices = {
-  ["Huge Pet"] = {
-    currentMarketPrice = 0,
-    lastUpdated = 0,
-    priceHistory = {}
-  },
-  ["Mythic Pet"] = {
-    currentMarketPrice = 0,
-    lastUpdated = 0,
-    priceHistory = {}
-  },
-  ["Legendary Pet"] = {
-    currentMarketPrice = 0, 
-    lastUpdated = 0,
-    priceHistory = {}
-  }
+-- AvioScript Configuration
+local AvioConfig = {
+  ScriptName = "AvioScript",
+  MinPetValue = 5000000,      -- Minimum pet value to snipe
+  MaxPrice = 50000000,        -- Maximum price to consider
+  AutoSnipeEnabled = false,   -- Auto-snipe toggle
+  DiscordWebhook = "",        -- Discord webhook URL
+  SniperInterval = 5,         -- Seconds between snipe attempts
+  LoggingEnabled = true       -- Enable/disable detailed logging
 }
 
--- Configuration with dynamic price tracking
-BoothSniper.Config = {
-  DiscordWebhook = "",
-  MinGems = 1000000,
-  MaxSpendGems = 5000000,
-  AutoBuy = true,
-  SniperEnabled = true,
-  UserPriceTargets = {
-    ["Huge Pet"] = {
-      minPrice = 3000000,
-      maxPrice = 6000000
-    },
-    ["Mythic Pet"] = {
-      minPrice = 2000000,
-      maxPrice = 4000000
+-- Advanced Logging Function
+local function AvioLog(message)
+  if AvioConfig.LoggingEnabled then
+    print("[" .. AvioConfig.ScriptName .. "] " .. message)
+  end
+end
+
+-- Discord Webhook Notification
+local function SendDiscordNotification(message)
+  if AvioConfig.DiscordWebhook ~= "" then
+    local data = {
+      ["content"] = "**" .. AvioConfig.ScriptName .. " Notification:**\n" .. message
     }
-  }
-}
-
--- Function to update real-time market prices
-function BoothSniper:UpdateMarketPrices()
-  -- Simulate market price tracking
-  -- In a real implementation, this would connect to an actual price API
-  for itemType, data in pairs(self.ItemPrices) do
-    local simulatedPrice = math.random(1000000, 10000000)
     
-    data.currentMarketPrice = simulatedPrice
-    data.lastUpdated = tick()
+    local success, response = pcall(function()
+      HttpService:PostAsync(
+        AvioConfig.DiscordWebhook, 
+        HttpService:JSONEncode(data), 
+        Enum.HttpContentType.ApplicationJson
+      )
+    end)
     
-    table.insert(data.priceHistory, simulatedPrice)
-    
-    -- Keep only last 10 price points
-    if #data.priceHistory > 10 then
-      table.remove(data.priceHistory, 1)
+    if not success then
+      AvioLog("Failed to send Discord notification: " .. tostring(response))
     end
   end
 end
 
--- Function to check if item meets user's price criteria
-function BoothSniper:MeetsPriceTarget(itemType, price)
-  local target = self.Config.UserPriceTargets[itemType]
+-- Advanced Booth Sniping Function
+local function SnipeBooth()
+  local localPlayer = Players.LocalPlayer
   
-  if not target then return false end
-  
-  return price >= target.minPrice and price <= target.maxPrice
-end
-
--- Advanced booth scanning with price tracking
-function BoothSniper:CheckBoothItems()
-  self:UpdateMarketPrices()  -- Update prices before scanning
-  
-  local booths = game:GetService("Workspace").Booths
-  
-  for _, booth in pairs(booths:GetChildren()) do
-    local items = booth:FindFirstChild("Items")
-    
-    if items then
-      for _, item in pairs(items:GetChildren()) do
-        local price = item:GetAttribute("Price")
-        local itemType = item.Name
-        
-        -- Check if item meets buying criteria
-        if self:MeetsPriceTarget(itemType, price) then
-          self:BuyItem(item)
-          self:SendDiscordNotification(item, price)
+  for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= localPlayer then
+      local success, boothData = pcall(function()
+        local booth = player:FindFirstChild("booth")
+        return booth
+      end)
+      
+      if success and boothData then
+        for _, item in ipairs(boothData.Items:GetChildren()) do
+          local petValue = item:GetAttribute("Value") or 0
+          local petPrice = item:GetAttribute("Price") or math.huge
+          
+          if petValue >= AvioConfig.MinPetValue and petPrice <= AvioConfig.MaxPrice then
+            local buyAttempt = pcall(function()
+              localPlayer.Character.HumanoidRootPart.CFrame = boothData.CFrame
+              -- Add specific buying logic here based on game mechanics
+            end)
+            
+            if buyAttempt then
+              local logMessage = string.format(
+                "Sniped Pet: Value = %d, Price = %d from %s", 
+                petValue, 
+                petPrice, 
+                player.Name
+              )
+              
+              AvioLog(logMessage)
+              SendDiscordNotification(logMessage)
+            end
+          end
         end
       end
     end
   end
 end
 
--- Discord notification with market price context
-function BoothSniper:SendDiscordNotification(item, price)
-  local marketPrice = self.ItemPrices[item.Name].currentMarketPrice
-  local message = string.format(
-    "Bought %s for %d gems (Market Price: %d gems)",
-    item.Name, price, marketPrice
-  )
-  
-  -- Implement Discord webhook logic here
+-- Main Sniper Loop
+local function StartAvioSniper()
+  while AvioConfig.AutoSnipeEnabled do
+    SnipeBooth()
+    wait(AvioConfig.SniperInterval)
+  end
 end
 
-return BoothSniper
+-- UI Setup (Optional - requires Kavo UI Library)
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/xHeptc/Kavo-UI-Library/main/source.lua"))()
+local Window = Library.CreateLib(AvioConfig.ScriptName .. " Booth Sniper", "DarkTheme")
+
+local MainTab = Window:NewTab("Sniper Settings")
+local MainSection = MainTab:NewSection("Booth Sniper Configuration")
+
+MainSection:NewToggle("Auto Snipe", "Enable/Disable Automatic Booth Sniping", function(state)
+  AvioConfig.AutoSnipeEnabled = state
+  if state then
+    spawn(StartAvioSniper)
+  end
+end)
+
+MainSection:NewSlider("Min Pet Value", "Minimum value of pets to snipe", 0, 100000000, function(value)
+  AvioConfig.MinPetValue = value
+end)
+
+MainSection:NewSlider("Max Price", "Maximum price to pay for a pet", 0, 100000000, function(value)
+  AvioConfig.MaxPrice = value
+end)
+
+MainSection:NewTextBox("Discord Webhook", "Set Discord Webhook URL", function(url)
+  AvioConfig.DiscordWebhook = url
+end)
+
+-- Start the script
+AvioLog("AvioScript Booth Sniper Loaded Successfully!")
